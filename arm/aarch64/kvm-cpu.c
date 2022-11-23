@@ -277,3 +277,39 @@ void kvm_cpu__show_registers(struct kvm_cpu *vcpu)
 		die("KVM_GET_ONE_REG failed (lr)");
 	dprintf(debug_fd, " LR:    0x%lx\n", data);
 }
+
+bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
+{
+	switch (vcpu->kvm_run->exit_reason) {
+	case KVM_EXIT_ARM_NISV:
+	{
+		struct kvm_one_reg reg;
+		u64 data = 0;
+		u64 pc, elr_el1;
+		int debug_fd = kvm_cpu__get_debug_fd();
+
+		reg.id   = ARM64_CORE_REG(regs.pc);
+		reg.addr = (u64)&data;
+		if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+			die_perror("KVM_SET_ONE_REG failed (pc)");
+		pc=data;
+
+		reg.id   = ARM64_CORE_REG(elr_el1);
+		reg.addr = (u64)&data;
+		if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+			die_perror("KVM_SET_ONE_REG failed (ELR_EL1)");
+		elr_el1=data;
+
+		dprintf(debug_fd, "\n NISV @PC=%llx!!!\n", pc);
+		dprintf(debug_fd, "    ISS=%llx\n", vcpu->kvm_run->arm_nisv.esr_iss);
+		dprintf(debug_fd, "    IPA=%llx\n", vcpu->kvm_run->arm_nisv.fault_ipa);
+		dprintf(debug_fd, "    ELR_EL1=%llx\n", elr_el1);
+
+		return false;
+
+		}
+		break;
+	}
+
+	return false;
+}

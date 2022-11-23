@@ -88,6 +88,8 @@ void kvm__arch_init(struct kvm *kvm, const char *hugetlbfs_path, u64 ram_size)
 		die("Failed to create virtual GIC");
 
 	kvm__arch_enable_mte(kvm);
+
+	kvm__arch_enable_nisv(kvm);
 }
 
 #define FDT_ALIGN	SZ_2M

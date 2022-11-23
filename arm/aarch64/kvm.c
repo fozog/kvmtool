@@ -140,3 +140,21 @@ void kvm__arch_enable_mte(struct kvm *kvm)
 
 	pr_debug("MTE capability enabled");
 }
+
+void kvm__arch_enable_nisv(struct kvm *kvm)
+{
+	if (kvm->cfg.arch.enable_nisv) {
+		struct kvm_enable_cap cap = { 0  };
+		cap.cap = KVM_CAP_ARM_NISV_TO_USER;
+
+		if (!kvm__supports_extension(kvm, KVM_CAP_ARM_NISV_TO_USER)) {
+			pr_info("KVM_CAP_ARM_NISV_TO_USER not available");
+			return;
+		}
+
+		if (ioctl(kvm->vm_fd, KVM_ENABLE_CAP, &cap))
+			die_perror("NISV requested but could not be activated");
+
+		pr_debug("NISV capability enabled");
+	}
+}
