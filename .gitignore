@@ -14,3 +14,5 @@ guest/init_stage2
 KVMTOOLS-VERSION-FILE
 /x86/bios/bios.bin
 /x86/bios/bios.bin.elf
+tests/arm/inject_nisv/inject_nisv.bin
+tests/arm/inject_nisv/inject_nisv.elf

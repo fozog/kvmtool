@@ -11,7 +11,7 @@ all: $(.o)
 	mkdir rootfs
 	gcc -static init.c -o rootfs/init
 ifdef MKISOFS
-	$(MKISOFS) rootfs -o boot_test.iso
+	$(MKISOFS) -o boot_test.iso rootfs
 else
 	$(error "mkisofs or xorriso needed to build boot_test.iso")
 endif

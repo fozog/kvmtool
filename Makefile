@@ -526,10 +526,10 @@ x86/bios/bios-rom.h: x86/bios/bios.bin.elf
 	$(E) "  NM      " $@
 	$(Q) cd x86/bios && sh gen-offsets.sh > bios-rom.h && cd ..
 
+export ARCH
+export PROGRAM
 check: all
 	$(MAKE) -C tests
-	./$(PROGRAM) run tests/pit/tick.bin
-	./$(PROGRAM) run -d tests/boot/boot_test.iso -p "init=init"
 .PHONY: check
 
 install: all
