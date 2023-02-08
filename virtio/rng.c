@@ -52,7 +52,7 @@ static size_t get_config_size(struct kvm *kvm, void *dev)
 	return 0;
 }
 
-static u32 get_host_features(struct kvm *kvm, void *dev)
+static u64 get_host_features(struct kvm *kvm, void *dev)
 {
 	/* Unused */
 	return 0;
@@ -162,7 +162,7 @@ int virtio_rng__init(struct kvm *kvm)
 	if (!kvm->cfg.virtio_rng)
 		return 0;
 
-	rdev = malloc(sizeof(*rdev));
+	rdev = calloc(1, sizeof(*rdev));
 	if (rdev == NULL)
 		return -ENOMEM;
 

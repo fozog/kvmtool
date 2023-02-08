@@ -14,9 +14,9 @@
 
 const char* virtio_trans_name(enum virtio_trans trans)
 {
-	if (trans == VIRTIO_PCI)
+	if (trans == VIRTIO_PCI || trans == VIRTIO_PCI_LEGACY)
 		return "pci";
-	else if (trans == VIRTIO_MMIO)
+	else if (trans == VIRTIO_MMIO || trans == VIRTIO_MMIO_LEGACY)
 		return "mmio";
 	return "unknown";
 }
@@ -165,7 +165,7 @@ void virtio_init_device_vq(struct kvm *kvm, struct virtio_device *vdev,
 	struct vring_addr *addr = &vq->vring_addr;
 
 	vq->endian		= vdev->endian;
-	vq->use_event_idx	= (vdev->features & VIRTIO_RING_F_EVENT_IDX);
+	vq->use_event_idx	= (vdev->features & (1UL << VIRTIO_RING_F_EVENT_IDX));
 	vq->enabled		= true;
 
 	if (addr->legacy) {
@@ -245,11 +245,11 @@ bool virtio_queue__should_signal(struct virt_queue *vq)
 }
 
 void virtio_set_guest_features(struct kvm *kvm, struct virtio_device *vdev,
-			       void *dev, u32 features)
+			       void *dev, u64 features)
 {
 	/* TODO: fail negotiation if features & ~host_features */
 
-	vdev->features = features;
+	vdev->features |= features;
 }
 
 void virtio_notify_status(struct kvm *kvm, struct virtio_device *vdev,
@@ -329,8 +329,10 @@ int virtio_init(struct kvm *kvm, void *dev, struct virtio_device *vdev,
 	int r;
 
 	switch (trans) {
-	case VIRTIO_PCI:
+	case VIRTIO_PCI_LEGACY:
 		vdev->legacy			= true;
+		/* fall through */
+	case VIRTIO_PCI:
 		virtio = calloc(sizeof(struct virtio_pci), 1);
 		if (!virtio)
 			return -ENOMEM;
@@ -343,8 +345,10 @@ int virtio_init(struct kvm *kvm, void *dev, struct virtio_device *vdev,
 		vdev->ops->reset		= virtio_pci__reset;
 		r = vdev->ops->init(kvm, dev, vdev, device_id, subsys_id, class);
 		break;
-	case VIRTIO_MMIO:
+	case VIRTIO_MMIO_LEGACY:
 		vdev->legacy			= true;
+		/* fall through */
+	case VIRTIO_MMIO:
 		virtio = calloc(sizeof(struct virtio_mmio), 1);
 		if (!virtio)
 			return -ENOMEM;

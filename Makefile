@@ -74,6 +74,8 @@ OBJS	+= virtio/rng.o
 OBJS    += virtio/balloon.o
 OBJS	+= virtio/pci.o
 OBJS	+= virtio/vsock.o
+OBJS	+= virtio/pci-legacy.o
+OBJS	+= virtio/pci-modern.o
 OBJS	+= disk/blk.o
 OBJS	+= disk/qcow.o
 OBJS	+= disk/raw.o
@@ -104,6 +106,8 @@ OBJS	+= virtio/9p-pdu.o
 OBJS	+= kvm-ipc.o
 OBJS	+= builtin-sandbox.o
 OBJS	+= virtio/mmio.o
+OBJS	+= virtio/mmio-legacy.o
+OBJS	+= virtio/mmio-modern.o
 
 # Translate uname -m into ARCH string
 ARCH ?= $(shell uname -m | sed -e s/i.86/i386/ -e s/ppc.*/powerpc/ \
@@ -111,11 +115,11 @@ ARCH ?= $(shell uname -m | sed -e s/i.86/i386/ -e s/ppc.*/powerpc/ \
 	  -e s/riscv64/riscv/ -e s/riscv32/riscv/)
 
 ifeq ($(ARCH),i386)
-	ARCH         := x86
+	override ARCH = x86
 	DEFINES      += -DCONFIG_X86_32
 endif
 ifeq ($(ARCH),x86_64)
-	ARCH         := x86
+	override ARCH = x86
 	DEFINES      += -DCONFIG_X86_64
 	ARCH_PRE_INIT = x86/init.S
 endif
@@ -170,6 +174,7 @@ ifeq ($(ARCH), arm)
 	OBJS		+= $(OBJS_ARM_COMMON)
 	OBJS		+= arm/aarch32/arm-cpu.o
 	OBJS		+= arm/aarch32/kvm-cpu.o
+	OBJS		+= arm/aarch32/kvm.o
 	ARCH_INCLUDE	:= $(HDRS_ARM_COMMON)
 	ARCH_INCLUDE	+= -Iarm/aarch32/include
 	CFLAGS		+= -march=armv7-a
@@ -348,13 +353,28 @@ $(warning No static libc found. Skipping guest init)
 endif
 
 ifeq (y,$(ARCH_WANT_LIBFDT))
-	ifneq ($(call try-build,$(SOURCE_LIBFDT),$(CFLAGS),-lfdt),y)
-          $(error No libfdt found. Please install libfdt-dev package)
-	else
+	ifneq ($(LIBFDT_DIR),)
+		ifeq ($(wildcard $(LIBFDT_DIR)),)
+                        $(error LIBFDT_DIR not found)
+		endif
+
+		LIBFDT_STATIC	:= $(LIBFDT_DIR)/libfdt.a
+
+		ifeq ($(wildcard $(LIBFDT_STATIC)),)
+                        $(error libfdt.a not found)
+		endif
+
+		CFLAGS_DYNOPT	+= -DCONFIG_HAS_LIBFDT
+		CFLAGS_STATOPT	+= -DCONFIG_HAS_LIBFDT
+		CFLAGS		+= -I $(LIBFDT_DIR)
+	else ifeq ($(call try-build,$(SOURCE_LIBFDT),$(CFLAGS),-lfdt),y)
+		LIBFDT_STATIC	:=
 		CFLAGS_DYNOPT	+= -DCONFIG_HAS_LIBFDT
 		CFLAGS_STATOPT	+= -DCONFIG_HAS_LIBFDT
 		LIBS_DYNOPT	+= -lfdt
 		LIBS_STATOPT	+= -lfdt
+	else
+                $(error No libfdt found. Please install libfdt-dev package or set LIBFDT_DIR)
 	endif
 endif
 
@@ -378,7 +398,7 @@ comma = ,
 # The dependency file for the current target
 depfile = $(subst $(comma),_,$(dir $@).$(notdir $@).d)
 
-DEPS	:= $(foreach obj,$(OBJS),\
+DEPS	:= $(foreach obj,$(OBJS) $(OBJS_DYNOPT) $(OTHEROBJS) $(GUEST_OBJS),\
 		$(subst $(comma),_,$(dir $(obj)).$(notdir $(obj)).d))
 
 DEFINES	+= -D_FILE_OFFSET_BITS=64
@@ -428,13 +448,13 @@ STATIC_OBJS = $(patsubst %.o,%.static.o,$(OBJS) $(OBJS_STATOPT))
 STATIC_DEPS	:= $(foreach obj,$(STATIC_OBJS),\
 		$(subst $(comma),_,$(dir $(obj)).$(notdir $(obj)).d))
 
-$(PROGRAM)-static:  $(STATIC_OBJS) $(OTHEROBJS) $(GUEST_OBJS)
+$(PROGRAM)-static:  $(STATIC_OBJS) $(OTHEROBJS) $(GUEST_OBJS) $(LIBFDT_STATIC)
 	$(E) "  LINK    " $@
-	$(Q) $(CC) -static $(CFLAGS) $(STATIC_OBJS) $(OTHEROBJS) $(GUEST_OBJS) $(LDFLAGS) $(LIBS) $(LIBS_STATOPT) -o $@
+	$(Q) $(CC) -static $(CFLAGS) $(STATIC_OBJS) $(OTHEROBJS) $(GUEST_OBJS) $(LDFLAGS) $(LIBS) $(LIBS_STATOPT) $(LIBFDT_STATIC) -o $@
 
-$(PROGRAM): $(OBJS) $(OBJS_DYNOPT) $(OTHEROBJS) $(GUEST_OBJS)
+$(PROGRAM): $(OBJS) $(OBJS_DYNOPT) $(OTHEROBJS) $(GUEST_OBJS) $(LIBFDT_STATIC)
 	$(E) "  LINK    " $@
-	$(Q) $(CC) $(CFLAGS) $(OBJS) $(OBJS_DYNOPT) $(OTHEROBJS) $(GUEST_OBJS) $(LDFLAGS) $(LIBS) $(LIBS_DYNOPT) -o $@
+	$(Q) $(CC) $(CFLAGS) $(OBJS) $(OBJS_DYNOPT) $(OTHEROBJS) $(GUEST_OBJS) $(LDFLAGS) $(LIBS) $(LIBS_DYNOPT) $(LIBFDT_STATIC) -o $@
 
 $(PROGRAM_ALIAS): $(PROGRAM)
 	$(E) "  LN      " $@
@@ -585,6 +605,7 @@ cscope:
 # Escape redundant work on cleaning up
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
+-include $(STATIC_DEPS)
 
 KVMTOOLS-VERSION-FILE:
 	@$(SHELL_PATH) util/KVMTOOLS-VERSION-GEN $(OUTPUT)

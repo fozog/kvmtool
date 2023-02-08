@@ -36,6 +36,7 @@
 
 #include <linux/types.h>
 #include <linux/err.h>
+#include <linux/sizes.h>
 
 #include <sys/utsname.h>
 #include <sys/types.h>
@@ -48,9 +49,11 @@
 #include <ctype.h>
 #include <stdio.h>
 
-#define MB_SHIFT		(20)
 #define KB_SHIFT		(10)
+#define MB_SHIFT		(20)
 #define GB_SHIFT		(30)
+#define TB_SHIFT		(40)
+#define PB_SHIFT		(50)
 
 __thread struct kvm_cpu *current_kvm_cpu;
 
@@ -86,8 +89,77 @@ void kvm_run_set_wrapper_sandbox(void)
 	kvm_run_wrapper = KVM_RUN_SANDBOX;
 }
 
+static int parse_mem_unit(char **next)
+{
+	switch (**next) {
+	case 'B': case 'b': (*next)++; return 0;
+	case 'K': case 'k': (*next)++; return KB_SHIFT;
+	case 'M': case 'm': (*next)++; return MB_SHIFT;
+	case 'G': case 'g': (*next)++; return GB_SHIFT;
+	case 'T': case 't': (*next)++; return TB_SHIFT;
+	case 'P': case 'p': (*next)++; return PB_SHIFT;
+	}
+
+	return MB_SHIFT;
+}
+
+static u64 parse_mem_option(const char *nptr, char **next)
+{
+	u64 shift;
+	u64 val;
+
+	errno = 0;
+	val = strtoull(nptr, next, 10);
+	if (errno == ERANGE)
+		die("Memory too large: %s", nptr);
+	if (*next == nptr)
+		die("Invalid memory specifier: %s", nptr);
+
+	shift = parse_mem_unit(next);
+	if ((val << shift) < val)
+		die("Memory too large: %s", nptr);
+
+	return val << shift;
+}
+
+static int mem_parser(const struct option *opt, const char *arg, int unset)
+{
+	struct kvm *kvm = opt->ptr;
+	char *next, *nptr;
+
+	kvm->cfg.ram_size = parse_mem_option(arg, &next);
+	if (kvm->cfg.ram_size == 0)
+		die("Invalid RAM size: %s", arg);
+
+	if (kvm__arch_has_cfg_ram_address() && *next == '@') {
+		next++;
+		if (*next == '\0')
+			die("Missing memory address: %s", arg);
+
+		nptr = next;
+		kvm->cfg.ram_addr = parse_mem_option(nptr, &next);
+	}
+
+	if (*next != '\0')
+		die("Invalid memory specifier: %s", arg);
+
+	return 0;
+}
+
 #ifndef OPT_ARCH_RUN
 #define OPT_ARCH_RUN(...)
+#endif
+
+#ifdef ARCH_HAS_CFG_RAM_ADDRESS
+#define MEM_OPT_HELP_SHORT	"size[BKMGTP][@addr[BKMGTP]]"
+#define MEM_OPT_HELP_LONG						\
+	"Virtual machine memory size and optional base address, both"	\
+	" measured by default in megabytes (M)"
+#else
+#define MEM_OPT_HELP_SHORT	"size[BKMGTP]"
+#define MEM_OPT_HELP_LONG						\
+	"Virtual machine memory size, by default measured in"		\
+	" in megabytes (M)"
 #endif
 
 #define BUILD_OPTIONS(name, cfg, kvm)					\
@@ -96,8 +168,8 @@ void kvm_run_set_wrapper_sandbox(void)
 	OPT_STRING('\0', "name", &(cfg)->guest_name, "guest name",	\
 			"A name for the guest"),			\
 	OPT_INTEGER('c', "cpus", &(cfg)->nrcpus, "Number of CPUs"),	\
-	OPT_U64('m', "mem", &(cfg)->ram_size, "Virtual machine memory"	\
-		" size in MiB."),					\
+	OPT_CALLBACK('m', "mem", NULL, MEM_OPT_HELP_SHORT,		\
+		     MEM_OPT_HELP_LONG, mem_parser, kvm),		\
 	OPT_CALLBACK('d', "disk", kvm, "image or rootfs_dir", "Disk "	\
 			" image or rootfs directory", img_name_parser,	\
 			kvm),						\
@@ -128,6 +200,8 @@ void kvm_run_set_wrapper_sandbox(void)
 			" rootfs"),					\
 	OPT_STRING('\0', "hugetlbfs", &(cfg)->hugetlbfs_path, "path",	\
 			"Hugetlbfs path"),				\
+	OPT_BOOLEAN('\0', "virtio-legacy", &(cfg)->virtio_legacy,	\
+		    "Use legacy virtio transport"),			\
 									\
 	OPT_GROUP("Kernel options:"),					\
 	OPT_STRING('k', "kernel", &(cfg)->kernel_filename, "kernel",	\
@@ -264,7 +338,7 @@ static u64 host_ram_size(void)
 		return 0;
 	}
 
-	return (nr_pages * page_size) >> MB_SHIFT;
+	return (u64)nr_pages * page_size;
 }
 
 /*
@@ -278,11 +352,11 @@ static u64 get_ram_size(int nr_cpus)
 	u64 available;
 	u64 ram_size;
 
-	ram_size	= 64 * (nr_cpus + 3);
+	ram_size	= (u64)SZ_64M * (nr_cpus + 3);
 
 	available	= host_ram_size() * RAM_SIZE_RATIO;
 	if (!available)
-		available = MIN_RAM_SIZE_MB;
+		available = MIN_RAM_SIZE;
 
 	if (ram_size > available)
 		ram_size	= available;
@@ -508,6 +582,8 @@ static void kvm_run_set_real_cmdline(struct kvm *kvm)
 
 static void kvm_run_validate_cfg(struct kvm *kvm)
 {
+	u64 available_ram;
+
 	if (kvm->cfg.kernel_filename && kvm->cfg.firmware_filename)
 		die("Only one of --kernel or --firmware can be specified");
 
@@ -517,6 +593,17 @@ static void kvm_run_validate_cfg(struct kvm *kvm)
 
 	if (kvm->cfg.firmware_filename && kvm->cfg.initrd_filename)
 		pr_warning("Ignoring initrd file when loading a firmware image");
+
+	if (kvm->cfg.ram_size) {
+		available_ram = host_ram_size();
+		if (available_ram && kvm->cfg.ram_size > available_ram) {
+			pr_warning("Guest memory size %lluMB exceeds host physical RAM size %lluMB",
+				(unsigned long long)kvm->cfg.ram_size >> MB_SHIFT,
+				(unsigned long long)available_ram >> MB_SHIFT);
+		}
+	}
+
+	kvm__arch_validate_cfg(kvm);
 }
 
 static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
@@ -530,6 +617,14 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 
 	nr_online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
 	kvm->cfg.custom_rootfs_name = "default";
+	/*
+	 * An architecture can allow the user to set the RAM base address to
+	 * zero. Initialize the address before parsing the command line
+	 * arguments, otherwise it will be impossible to distinguish between the
+	 * user setting the base address to zero or letting it unset and using
+	 * the default value.
+	 */
+	kvm->cfg.ram_addr = kvm__arch_default_ram_address();
 
 	while (argc != 0) {
 		BUILD_OPTIONS(options, &kvm->cfg, kvm);
@@ -595,13 +690,6 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 
 	if (!kvm->cfg.ram_size)
 		kvm->cfg.ram_size = get_ram_size(kvm->cfg.nrcpus);
-
-	if (kvm->cfg.ram_size > host_ram_size())
-		pr_warning("Guest memory size %lluMB exceeds host physical RAM size %lluMB",
-			(unsigned long long)kvm->cfg.ram_size,
-			(unsigned long long)host_ram_size());
-
-	kvm->cfg.ram_size <<= MB_SHIFT;
 
 	if (!kvm->cfg.dev)
 		kvm->cfg.dev = DEFAULT_KVM_DEV;
@@ -676,12 +764,12 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 	if (kvm->cfg.kernel_filename) {
 		printf("  # %s run -k %s -m %Lu -c %d --name %s\n", KVM_BINARY_NAME,
 		       kvm->cfg.kernel_filename,
-		       (unsigned long long)kvm->cfg.ram_size / 1024 / 1024,
+		       (unsigned long long)kvm->cfg.ram_size >> MB_SHIFT,
 		       kvm->cfg.nrcpus, kvm->cfg.guest_name);
 	} else if (kvm->cfg.firmware_filename) {
 		printf("  # %s run --firmware %s -m %Lu -c %d --name %s\n", KVM_BINARY_NAME,
 		       kvm->cfg.firmware_filename,
-		       (unsigned long long)kvm->cfg.ram_size / 1024 / 1024,
+		       (unsigned long long)kvm->cfg.ram_size >> MB_SHIFT,
 		       kvm->cfg.nrcpus, kvm->cfg.guest_name);
 	}
 
