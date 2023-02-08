@@ -248,6 +248,24 @@ void kvm_cpu__show_code(struct kvm_cpu *vcpu)
 	kvm__dump_mem(vcpu->kvm, data, 32, debug_fd);
 }
 
+void kvm_cpu__show_step(struct kvm_cpu *vcpu)
+{
+	struct kvm_one_reg reg;
+	unsigned long pc;
+	int debug_fd = kvm_cpu__get_debug_fd();
+
+	reg.id		= ARM64_CORE_REG(regs.pc);
+	reg.addr = (u64)&pc;
+	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+		die("KVM_GET_ONE_REG failed (pc)");
+
+	uint32_t* instruction = guest_flat_to_host(vcpu->kvm, pc);
+	if (!host_ptr_in_ram(vcpu->kvm, instruction + 1))
+		die("SingleStep requesting instruction outside memory");
+
+	dprintf(debug_fd, " 0x%016lx: %08x\n", pc, *instruction);
+}
+
 void kvm_cpu__show_registers(struct kvm_cpu *vcpu)
 {
 	struct kvm_one_reg reg;
