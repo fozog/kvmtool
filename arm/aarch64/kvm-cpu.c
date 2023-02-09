@@ -112,6 +112,13 @@ static void reset_vcpu_aarch64(struct kvm_cpu *vcpu)
 	if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
 		die_perror("KVM_SET_ONE_REG failed (x3)");
 
+	//make sure we know what VBAR is.
+	//This will be needed to handle TFA execution later
+	data	= 0xf0000000;
+	reg.id	= KVM_REG_ARM_VBAR_EL1;
+	if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
+		die_perror("KVM_SET_ONE_REG failed (VBAR_EL1)");
+
 	/* Secondary cores are stopped awaiting PSCI wakeup */
 	if (vcpu->cpu_id == 0) {
 		/* x0 = physical address of the device tree blob */
@@ -248,6 +255,32 @@ void kvm_cpu__show_code(struct kvm_cpu *vcpu)
 	kvm__dump_mem(vcpu->kvm, data, 32, debug_fd);
 }
 
+void kvm_cpu__show_step(struct kvm_cpu *vcpu)
+{
+	struct kvm_one_reg reg;
+	unsigned long pc;
+	int debug_fd = kvm_cpu__get_debug_fd();
+
+	reg.id		= ARM64_CORE_REG(regs.pc);
+	reg.addr = (u64)&pc;
+	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+		die("KVM_GET_ONE_REG failed (pc)");
+
+	uint32_t* instruction = guest_flat_to_host(vcpu->kvm, pc);
+	if (!host_ptr_in_ram(vcpu->kvm, instruction + 1))
+		die("SingleStep requesting instruction outside memory");
+
+
+	unsigned long value;
+	reg.addr = (u64)&value;
+	reg.id		= ARM64_CORE_REG(regs.regs[0]);
+	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+		die("KVM_GET_ONE_REG failed (lr)");
+
+	dprintf(debug_fd, " 0x%016lx: %08x    x0=%lx\n", pc, *instruction, value);
+
+}
+
 void kvm_cpu__show_registers(struct kvm_cpu *vcpu)
 {
 	struct kvm_one_reg reg;
@@ -276,4 +309,51 @@ void kvm_cpu__show_registers(struct kvm_cpu *vcpu)
 	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
 		die("KVM_GET_ONE_REG failed (lr)");
 	dprintf(debug_fd, " LR:    0x%lx\n", data);
+}
+
+
+bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
+{
+	switch (vcpu->kvm_run->exit_reason) {
+	case KVM_EXIT_ARM_RAW_MODE:
+	{
+		struct kvm_one_reg reg;
+		u64 data = 0;
+		u64 pc, elr_el1;
+		int debug_fd = kvm_cpu__get_debug_fd();
+
+		u64 esr_el2 = vcpu->kvm_run->arm_nisv.esr_iss;
+		int ec = (esr_el2 >> 26) & 0x3F;
+
+		reg.id   = ARM64_CORE_REG(regs.pc);
+		reg.addr = (u64)&data;
+		if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+			die_perror("KVM_SET_ONE_REG failed (pc)");
+		pc=data;
+
+		reg.id   = ARM64_CORE_REG(elr_el1);
+		reg.addr = (u64)&data;
+		if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+			die_perror("KVM_SET_ONE_REG failed (ELR_EL1)");
+		elr_el1=data;
+
+		dprintf(debug_fd, "\nRAW @PC=%llx\n", pc);
+		dprintf(debug_fd, "    ESR_EL2=%llx\n", vcpu->kvm_run->arm_raw.esr_el2);
+		dprintf(debug_fd, "        EC=%x\n", ec);
+		dprintf(debug_fd, "    IPA=%llx\n", vcpu->kvm_run->arm_raw.fault_ipa);
+		dprintf(debug_fd, "    ELR_EL1=%llx\n", elr_el1);
+
+		// lets pretend the PC is at the instruction that caused the problem
+		data	= elr_el1;
+		reg.id	= ARM64_CORE_REG(regs.pc);
+		if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
+			die_perror("KVM_SET_ONE_REG failed (pc)");
+
+		return false;
+
+		}
+		break;
+	}
+
+	return false;
 }

@@ -258,14 +258,18 @@ static void *kvm_cpu_thread(void *arg)
 	return (void *) (intptr_t) 0;
 
 panic_kvm:
+
 	fprintf(stderr, "KVM exit reason: %u (\"%s\")\n",
 		current_kvm_cpu->kvm_run->exit_reason,
 		kvm_exit_reasons[current_kvm_cpu->kvm_run->exit_reason]);
+
+
 	if (current_kvm_cpu->kvm_run->exit_reason == KVM_EXIT_UNKNOWN)
 		fprintf(stderr, "KVM exit code: 0x%llu\n",
 			(unsigned long long)current_kvm_cpu->kvm_run->hw.hardware_exit_reason);
 
 	kvm_cpu__set_debug_fd(STDOUT_FILENO);
+
 	kvm_cpu__show_registers(current_kvm_cpu);
 	kvm_cpu__show_code(current_kvm_cpu);
 	kvm_cpu__show_page_tables(current_kvm_cpu);

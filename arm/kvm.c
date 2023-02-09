@@ -92,6 +92,8 @@ void kvm__arch_init(struct kvm *kvm)
 		die("Failed to create virtual GIC");
 
 	kvm__arch_enable_mte(kvm);
+
+	kvm__arch_enable_raw_mode(kvm);
 }
 
 #define FDT_ALIGN	SZ_2M

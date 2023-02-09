@@ -156,8 +156,19 @@ int kvm_cpu__start(struct kvm_cpu *cpu)
 
 	kvm_cpu__reset_vcpu(cpu);
 
-	if (cpu->kvm->cfg.single_step)
+	if (cpu->kvm->cfg.single_step) {
 		kvm_cpu__enable_singlestep(cpu);
+		/* the first instruction of the program will be executed then
+		 there will be a singlestep exit.
+		 On MacOS HVF, when starting a program with single step,
+		 the first run exits on the first instruction (before it is
+		 executed).
+		 So, to actually show case all instructions executed, we need
+		 to display the first instruction.
+		 */
+		kvm_cpu__show_step(cpu);
+	}
+
 
 	while (cpu->is_running) {
 		if (cpu->needs_nmi) {
@@ -174,8 +185,9 @@ int kvm_cpu__start(struct kvm_cpu *cpu)
 		case KVM_EXIT_UNKNOWN:
 			break;
 		case KVM_EXIT_DEBUG:
-			kvm_cpu__show_registers(cpu);
-			kvm_cpu__show_code(cpu);
+			kvm_cpu__show_step(cpu);
+			/*kvm_cpu__show_registers(cpu);
+			kvm_cpu__show_code(cpu); */
 			break;
 		case KVM_EXIT_IO: {
 			bool ret;

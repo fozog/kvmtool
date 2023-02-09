@@ -55,6 +55,10 @@ const char *kvm_exit_reasons[] = {
 #ifdef CONFIG_PPC64
 	DEFINE_KVM_EXIT_REASON(KVM_EXIT_PAPR_HCALL),
 #endif
+#ifdef CONFIG_ARM64
+	DEFINE_KVM_EXIT_REASON(KVM_EXIT_ARM_NISV),
+	DEFINE_KVM_EXIT_REASON(KVM_EXIT_ARM_RAW_MODE),
+#endif
 };
 
 static int pause_event;

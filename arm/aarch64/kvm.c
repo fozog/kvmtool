@@ -160,3 +160,21 @@ void kvm__arch_enable_mte(struct kvm *kvm)
 
 	pr_debug("MTE capability enabled");
 }
+
+void kvm__arch_enable_raw_mode(struct kvm *kvm)
+{
+	if (kvm->cfg.arch.enable_raw) {
+		struct kvm_enable_cap cap = { 0  };
+
+		if (!kvm__supports_extension(kvm, KVM_CAP_ARM_RAW_MODE)) {
+			pr_info("KVM_CAP_ARM_RAW not available");
+			return;
+		}
+
+		cap.cap = KVM_CAP_ARM_RAW_MODE;
+		if (ioctl(kvm->vm_fd, KVM_ENABLE_CAP, &cap))
+			die_perror("RAW_MODE requested but could not be activated");
+
+		pr_info("RAW_MODE capability enabled");
+	}
+}
