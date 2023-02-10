@@ -244,6 +244,18 @@ ifeq ($(call try-build,$(SOURCE_STRLCPY),$(CFLAGS),$(LDFLAGS)),y)
 	CFLAGS_STATOPT	+= -DHAVE_STRLCPY
 endif
 
+ifeq ($(call try-build,$(SOURCE_OPCODES),$(CFLAGS),$(LDFLAGS) -lopcodes -static),y)
+	CFLAGS_STATOPT	+= -DCONFIG_HAS_OPCODES
+	LIBS_STATOPT	+= -lopcodes
+else
+	ifeq ($(call try-build,$(SOURCE_OPCODES),$(CFLAGS),$(LDFLAGS) -lopcodes),y)
+		CFLAGS_DYNOPT	+= -DCONFIG_HAS_OPCODES
+		LIBS_DYNOPT	+= -lopcodes
+	else
+		NOTFOUND	+= opcodes
+	endif
+endif
+
 ifeq ($(call try-build,$(SOURCE_BFD),$(CFLAGS),$(LDFLAGS) -lbfd -static),y)
 	CFLAGS_STATOPT	+= -DCONFIG_HAS_BFD
 	OBJS_STATOPT	+= symbol.o

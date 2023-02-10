@@ -106,6 +106,18 @@ int main(void)
 }
 endef
 
+define SOURCE_OPCODES
+#include <dis-asm.h>
+
+int main(void)
+{
+	disassembler(bfd_arch_aarch64, false, bfd_mach_aarch64, NULL);
+	return 0;
+}
+
+endef
+
+
 define SOURCE_CPLUS_DEMANGLE
 extern char *cplus_demangle(const char *, int);
 

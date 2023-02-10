@@ -6,6 +6,131 @@
 #include <asm/ptrace.h>
 #include <linux/err.h>
 
+
+#ifdef CONFIG_HAS_OPCODES
+
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <dis-asm.h>
+
+disassembler_ftype disasm;
+
+#ifdef CONFIG_HAS_BFD
+// from symbol.c
+extern asymbol **syms;
+extern asection *section;
+extern int nr_syms;
+extern bfd *abfd;
+
+#define ABFD	abfd
+
+#else
+
+#define ABFD	NULL
+#endif
+
+typedef struct {
+  char *insn_buffer;
+  bool reenter;
+} stream_state;
+
+/* This approach isn't very memory efficient or clear,
+ * but it avoids external size/buffer tracking in this
+ * example.
+ */
+static int dis_sprintf(void *stream, const char *fmt, ...) {
+	stream_state *ss = (stream_state *)stream;
+
+	va_list arg;
+	va_start(arg, fmt);
+	if (!ss->reenter) {
+		int r=vasprintf(&ss->insn_buffer, fmt, arg);
+		if (r < 0) die("disassembler memory error");
+		ss->reenter = true;
+	} else {
+		char *tmp;
+		int r = vasprintf(&tmp, fmt, arg);
+		if (r < 0) die("disassembler memory error");
+		char *tmp2;
+		r = asprintf(&tmp2, "%s%s", ss->insn_buffer, tmp);
+		if (r < 0) die("disassembler memory error");
+		free(ss->insn_buffer);
+		free(tmp);
+		ss->insn_buffer = tmp2;
+	}
+	va_end(arg);
+
+	return 0;
+}
+
+
+static char *disassemble(uint8_t *input_buffer, size_t input_buffer_size) {
+	char *disassembled = NULL;
+	stream_state ss = {};
+
+	disassemble_info disasm_info = {};
+	init_disassemble_info(&disasm_info, &ss, dis_sprintf);
+	disasm_info.arch = bfd_arch_aarch64;
+	disasm_info.mach = bfd_mach_aarch64;
+	disasm_info.read_memory_func = buffer_read_memory;
+	disasm_info.buffer = input_buffer;
+	disasm_info.buffer_vma = 0;
+	disasm_info.buffer_length = input_buffer_size;
+#ifdef CONFIG_HAS_BFD
+	disasm_info.section = section;
+	disasm_info.symbols = syms;
+	disasm_info.num_symbols = nr_syms;
+#endif
+	disassemble_init_for_target(&disasm_info);
+
+	size_t pc = 0;
+	while (pc < input_buffer_size) {
+		size_t insn_size = disasm(pc, &disasm_info);
+		pc += insn_size;
+
+		if (disassembled == NULL) {
+			int r = asprintf(&disassembled, "%s", ss.insn_buffer);
+			if (r < 0) die("disassembler memory error");
+		} else {
+			char *tmp;
+			int r = asprintf(&tmp, "%s\n%s", disassembled, ss.insn_buffer);
+			if (r < 0) die("disassembler memory error");
+			free(disassembled);
+			disassembled = tmp;
+		}
+
+		/* Reset the stream state after each instruction decode.
+		*/
+		free(ss.insn_buffer);
+		ss.reenter = false;
+	}
+
+	return disassembled;
+}
+
+int disas_init(struct kvm *kvm);
+int disas_init(struct kvm *kvm)
+{
+	disasm = disassembler(bfd_arch_aarch64, false, bfd_mach_aarch64, ABFD);
+	return 0;
+}
+late_init(disas_init)
+
+int disas_exit(struct kvm *kvm);
+int disas_exit(struct kvm *kvm)
+{
+	// anything to do?
+	return 0;
+}
+late_init(disas_exit)
+
+#endif
+
+
 #define COMPAT_PSR_F_BIT	0x00000040
 #define COMPAT_PSR_I_BIT	0x00000080
 #define COMPAT_PSR_E_BIT	0x00000200
@@ -273,31 +398,42 @@ void kvm_cpu__show_step(struct kvm_cpu *vcpu)
 	struct kvm_one_reg reg;
 	unsigned long pc;
 	int debug_fd = kvm_cpu__get_debug_fd();
+	
 	char sym[MAX_SYM_LEN] = SYMBOL_DEFAULT_UNKNOWN, *psym;
-
+	char* opcode = NULL;
+	
 	reg.id		= ARM64_CORE_REG(regs.pc);
 	reg.addr = (u64)&pc;
 	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
 		die("KVM_GET_ONE_REG failed (pc)");
-
+	
 	uint32_t* instruction = guest_flat_to_host(vcpu->kvm, pc);
 	if (!host_ptr_in_ram(vcpu->kvm, instruction + 1))
 		die("SingleStep requesting instruction outside memory");
-
+	
+#ifdef CONFIG_HAS_OPCODES
+	opcode = disassemble((uint8_t*)instruction, 4);
+	char* tmp = opcode;
+	while(*tmp != '\0') {
+		if (*tmp =='\t') *tmp=' ';
+		tmp++;
+	}
+#endif
+	
+#ifdef CONFIG_HAS_BFD
 	psym = symbol_lookup(vcpu->kvm, pc - 0x0000000080080000, sym, MAX_SYM_LEN);
 	if (IS_ERR(psym))
 		dprintf(debug_fd,
 			"Warning: symbol_lookup() failed to find symbol "
 			"with error: %ld\n", PTR_ERR(psym));
-
-	unsigned long value;
-	reg.addr = (u64)&value;
-	reg.id		= ARM64_CORE_REG(regs.regs[0]);
-	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
-		die("KVM_GET_ONE_REG failed (lr)");
-
-	dprintf(debug_fd, " 0x%016lx: %08x    x0=%lx ; %s\n", pc, *instruction, value, sym);
-
+#endif
+	
+	dprintf(debug_fd, "0x%012lx: %08x  %-42s ; %s\n", pc, *instruction, opcode != NULL ? opcode : "", sym);
+	
+#ifdef CONFIG_HAS_OPCODES
+	if (opcode != NULL) free(opcode);
+#endif
+	
 }
 
 void kvm_cpu__show_registers(struct kvm_cpu *vcpu)

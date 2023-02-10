@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <bfd.h>
 
-static bfd *abfd = NULL;
+bfd *abfd = NULL;
 asymbol **syms = NULL;
 asection *section = NULL;
 int nr_syms;
@@ -127,7 +127,8 @@ char *symbol_lookup(struct kvm *kvm, unsigned long addr, char *sym, size_t size)
 
 	sym_offset = addr - sym_start;
 
-	snprintf(sym, size, "%s+%llx (%s:%i)", func, (long long) sym_offset, filename, line);
+	//snprintf(sym, size, "%s+%llx (%s:%i)", func, (long long) sym_offset, filename, line);
+	snprintf(sym, size, "%s+%llx", func, (long long) sym_offset);
 
 	sym[size - 1] = '\0';
 
