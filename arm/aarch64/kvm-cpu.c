@@ -384,24 +384,31 @@ void kvm_cpu__show_code(struct kvm_cpu *vcpu)
 		die("KVM_GET_ONE_REG failed (show_code @ PC)");
 	pc = data;
 	
+	if (IS_IN_EMULATION_TABLE(pc)) {
+		reg.id   = ARM64_CORE_REG(elr_el1);
+		if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+			die_perror("KVM_SET_ONE_REG failed (ELR_EL1)");
+		pc=data;
+	}
+	
 	uint32_t* instruction = guest_flat_to_host(vcpu->kvm, pc);
-
+	if (instruction != NULL) {
 #ifdef CONFIG_HAS_OPCODES
-	opcode = disassemble((uint8_t*)instruction, 4);
+		opcode = disassemble((uint8_t*)instruction, 4);
 #endif
 
 #ifdef CONFIG_HAS_BFD
-	psym = symbol_lookup(vcpu->kvm, data, sym, MAX_SYM_LEN);
+		psym = symbol_lookup(vcpu->kvm, data, sym, MAX_SYM_LEN);
 #endif
-	
-	dprintf(debug_fd, "0x%012llx: %08x  %-42s ; %s\n", pc, *instruction, opcode != NULL ? opcode : "", IS_ERR(psym) ? "" : psym);
-	
-	dprintf(debug_fd, "\n*LR:\n");
-	reg.id = ARM64_CORE_REG(regs.regs[30]);
-	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
-		die("KVM_GET_ONE_REG failed (show_code @ LR)");
-
-	kvm__dump_mem(vcpu->kvm, data, 32, debug_fd);
+		dprintf(debug_fd, "0x%012llx: %08x  %-42s ; %s\n", pc, *instruction, opcode != NULL ? opcode : "", IS_ERR(psym) ? "" : psym);
+		
+		dprintf(debug_fd, "\n*LR:\n");
+		reg.id = ARM64_CORE_REG(regs.regs[30]);
+		if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+			die("KVM_GET_ONE_REG failed (show_code @ LR)");
+		
+		kvm__dump_mem(vcpu->kvm, data, 32, debug_fd);
+	}
 }
 
 void kvm_cpu__show_step(struct kvm_cpu *vcpu)
@@ -424,7 +431,8 @@ void kvm_cpu__show_step(struct kvm_cpu *vcpu)
 		die("SingleStep requesting instruction outside memory");
 	
 #ifdef CONFIG_HAS_OPCODES
-	opcode = disassemble((uint8_t*)instruction, 4);
+	if (instruction != NULL)
+		opcode = disassemble((uint8_t*)instruction, 4);
 #endif
 	
 #ifdef CONFIG_HAS_BFD
@@ -500,6 +508,21 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 
 	switch(ec) {
 		
+		case INSTRUCTION_ABORT_EXCEPTION:
+		{
+			// we trap instructions that may need to be simulated
+			// for instance accessing EL3, EL2 registers
+			dprintf(debug_fd, "INSTRUCTION_ABORT_EXCEPTION\n");
+/*			data	= pc + 4;
+			reg.id	= ARM64_CORE_REG(regs.pc);
+			if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
+				die_perror("KVM_SET_ONE_REG failed (pc)");
+*/
+			return false;
+		}
+		break;
+
+
 		case HVC_EXCEPTION:
 		{
 			u16 hvc_id = esr_el2 & 0xFFFF;
@@ -524,6 +547,35 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 		}
 		break;
 			
+
+		case MRS_EXCPETION:
+		{
+			// We trap MRS and MSR on registers like TTBR1_EL1
+
+			dprintf(debug_fd, "MRS_EXCPETION\n");
+			data	= pc + 4;
+			reg.id	= ARM64_CORE_REG(regs.pc);
+			if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
+				die_perror("KVM_SET_ONE_REG failed (pc)");
+			return true;
+		}
+		break;
+
+
+		case DATA_ABORT_EXCEPTION:
+		{
+			// MMIO is handled the traditional way for the moment
+			// we get NISV here
+			dprintf(debug_fd, "DATA_ABORT_EXCEPTION\n");
+/*			data	= pc + 4;
+			reg.id	= ARM64_CORE_REG(regs.pc);
+			if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
+				die_perror("KVM_SET_ONE_REG failed (pc)");
+*/
+			return false;
+		}
+		break;
+			
 		default:
 			dprintf(debug_fd, "\nRAW @PC=%llx\n", pc);
 			dprintf(debug_fd, "    ESR_EL2=%llx\n", esr_el2);
@@ -534,14 +586,5 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 			return false;
 			
 	}
-	/*
-	// lets pretend the PC is at the instruction that caused the problem
-	data	= elr_el1;
-	reg.id	= ARM64_CORE_REG(regs.pc);
-	if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
-		die_perror("KVM_SET_ONE_REG failed (pc)");
-
-	return false;
-	 */
 
 }

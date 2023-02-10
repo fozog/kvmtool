@@ -102,6 +102,26 @@
 #define BREAKPOINT_EXCEPTION            (0b110000)
 #define SOFTWARE_STEP_EXCEPTION         (0b110010)
 
+
+// VBAR_EL1 of the guest will be set at one of the two values
+// this will allow identification of the expected behavior:
+//Emulate all the exception levels of a processor
+// the addresses have to be selected so that they are not in the
+// guest address space
+#define EMULATION_VBAR_ADDRESS      0xf0000000ULL
+// Normal behavior of Exception level 1 only guests
+#define UNTRAPPED_VBAR_ADDRESS      0xf1000000ULL
+
+// Return from traps, place it at 3GB for the moment to allow simple TFA MMU handling
+//#define INJECTION_VBAR_ADDRESS      0xC0000000ULL
+#define INJECTION_VBAR_ADDRESS      (1024*1024ULL)
+
+#define IS_IN_EMULATION_TABLE(x)    (((x) >= EMULATION_VBAR_ADDRESS) && ((x) < EMULATION_VBAR_ADDRESS + 16 * 128))
+// when VBAR_EL1 is not set (not trying to emulate)
+#define IS_IN_UNTRAPPED_TABLE(x)    (((x) >= UNTRAPPED_VBAR_ADDRESS) && ((x) < UNTRAPPED_VBAR_ADDRESS + 16 * 128))
+#define IS_IN_INJECTION_TABLE(x)    (((x) >= INJECTION_VBAR_ADDRESS) && ((x) < INJECTION_VBAR_ADDRESS + 16 * 128))
+
+
 static inline bool arm_addr_in_ioport_region(u64 phys_addr)
 {
 	u64 limit = KVM_IOPORT_AREA + ARM_IOPORT_SIZE;
