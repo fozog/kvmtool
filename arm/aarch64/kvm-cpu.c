@@ -108,7 +108,13 @@ static char* disassemble(uint8_t *input_buffer, size_t input_buffer_size) {
 		free(ss.insn_buffer);
 		ss.reenter = false;
 	}
-
+	if (disassembled != NULL) {
+		char* tmp = disassembled;
+		while(*tmp != '\0') {
+			if (*tmp =='\t') *tmp=' ';
+			tmp++;
+		}
+	}
 	return disassembled;
 }
 
@@ -366,26 +372,31 @@ void kvm_cpu__show_code(struct kvm_cpu *vcpu)
 	struct kvm_one_reg reg;
 	unsigned long data;
 	int debug_fd = kvm_cpu__get_debug_fd();
-	char sym[MAX_SYM_LEN] = SYMBOL_DEFAULT_UNKNOWN, *psym;
+	char sym[MAX_SYM_LEN] = SYMBOL_DEFAULT_UNKNOWN;
+	char* psym = NULL;
+	char* opcode = NULL;
+	u64 pc;
 	
 	reg.addr = (u64)&data;
 
-	
-	dprintf(debug_fd, "\nPC: ");
 	reg.id = ARM64_CORE_REG(regs.pc);
 	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
 		die("KVM_GET_ONE_REG failed (show_code @ PC)");
+	pc = data;
+	
+	uint32_t* instruction = guest_flat_to_host(vcpu->kvm, pc);
 
-	kvm__dump_mem(vcpu->kvm, data, 32, debug_fd);
+#ifdef CONFIG_HAS_OPCODES
+	opcode = disassemble((uint8_t*)instruction, 4);
+#endif
 
+#ifdef CONFIG_HAS_BFD
 	psym = symbol_lookup(vcpu->kvm, data, sym, MAX_SYM_LEN);
-	if (IS_ERR(psym))
-		dprintf(debug_fd,
-			"Warning: symbol_lookup() failed to find symbol "
-			"with error: %ld\n", PTR_ERR(psym));
-
-	dprintf(debug_fd, " (%s) \n", sym);
-	dprintf(debug_fd, "\n*lr:\n");
+#endif
+	
+	dprintf(debug_fd, "0x%012llx: %08x  %-42s ; %s\n", pc, *instruction, opcode != NULL ? opcode : "", IS_ERR(psym) ? "" : psym);
+	
+	dprintf(debug_fd, "\n*LR:\n");
 	reg.id = ARM64_CORE_REG(regs.regs[30]);
 	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
 		die("KVM_GET_ONE_REG failed (show_code @ LR)");
@@ -414,18 +425,13 @@ void kvm_cpu__show_step(struct kvm_cpu *vcpu)
 	
 #ifdef CONFIG_HAS_OPCODES
 	opcode = disassemble((uint8_t*)instruction, 4);
-	char* tmp = opcode;
-	while(*tmp != '\0') {
-		if (*tmp =='\t') *tmp=' ';
-		tmp++;
-	}
 #endif
 	
 #ifdef CONFIG_HAS_BFD
 	psym = symbol_lookup(vcpu->kvm, pc - 0x0000000080080000, sym, MAX_SYM_LEN);
 #endif
 	
-	dprintf(debug_fd, "0x%012lx: %08x  %-42s ; %s\n", pc, *instruction, opcode != NULL ? opcode : "", (IS_ERR(psym) || psym== NULL) ? "" : psym);
+	dprintf(debug_fd, "0x%012lx: %08x  %-42s ; %s\n", pc, *instruction, opcode != NULL ? opcode : "", IS_ERR(psym) ? "" : psym);
 	
 #ifdef CONFIG_HAS_OPCODES
 	if (opcode != NULL) free(opcode);
@@ -492,12 +498,6 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 		die_perror("KVM_SET_ONE_REG failed (ELR_EL1)");
 	elr_el1=data;
 
-	dprintf(debug_fd, "\nRAW @PC=%llx\n", pc);
-	dprintf(debug_fd, "    ESR_EL2=%llx\n", esr_el2);
-	dprintf(debug_fd, "        EC=%x\n", ec);
-	dprintf(debug_fd, "    IPA=%llx\n", fault_ipa);
-	dprintf(debug_fd, "    ELR_EL1=%llx\n", elr_el1);
-
 	switch(ec) {
 		
 		case HVC_EXCEPTION:
@@ -510,7 +510,27 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 		}
 		break;
 		
+			
+		case WF_EXCEPTION:
+		{
+			// just ignore for the moment
+			dprintf(debug_fd, "WFx ignored\n");
+			data	= pc + 4;
+			reg.id	= ARM64_CORE_REG(regs.pc);
+			if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
+				die_perror("KVM_SET_ONE_REG failed (pc)");
+
+			return true;
+		}
+		break;
+			
 		default:
+			dprintf(debug_fd, "\nRAW @PC=%llx\n", pc);
+			dprintf(debug_fd, "    ESR_EL2=%llx\n", esr_el2);
+			dprintf(debug_fd, "        EC=%x\n", ec);
+			dprintf(debug_fd, "    IPA=%llx\n", fault_ipa);
+			dprintf(debug_fd, "    ELR_EL1=%llx\n", elr_el1);
+
 			return false;
 			
 	}
