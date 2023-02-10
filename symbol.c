@@ -8,12 +8,16 @@
 #include <stdio.h>
 #include <bfd.h>
 
-static bfd *abfd;
+static bfd *abfd = NULL;
+asymbol **syms = NULL;
+asection *section = NULL;
+int nr_syms;
 
 int symbol_init(struct kvm *kvm)
 {
 	const char* source = kvm->vmlinux;
-	
+	long symtab_size;
+
 	int ret = 0;
 
 	if (!kvm->vmlinux) {
@@ -41,6 +45,39 @@ int symbol_init(struct kvm *kvm)
 			break;
 		}
 	}
+
+	if (!bfd_check_format(abfd, bfd_object)) {
+		ret = -EFAULT;
+		goto out_close;
+	}
+	
+	symtab_size = bfd_get_symtab_upper_bound(abfd);
+	if (!symtab_size) {
+		ret = -EFAULT;
+		goto out_close;
+	}
+	
+	syms = malloc(symtab_size);
+	if (!syms) {
+		ret = -ENOMEM;
+		goto out_close;
+	}
+
+	nr_syms = bfd_canonicalize_symtab(abfd, syms);
+
+	section = bfd_get_section_by_name(abfd, ".text");
+	if (!section) {
+		ret = -EFAULT;
+		free(syms);
+		syms=NULL;
+		goto out_close;
+	}
+	
+	return ret;
+
+out_close:
+	bfd_close(abfd);
+	abfd=NULL;
 	return ret;
 }
 late_init(symbol_init);
@@ -66,36 +103,15 @@ char *symbol_lookup(struct kvm *kvm, unsigned long addr, char *sym, size_t size)
 	const char *filename;
 	bfd_vma sym_offset;
 	bfd_vma sym_start;
-	asection *section;
+
 	unsigned int line;
 	const char *func=NULL;
-	long symtab_size;
+	
 	asymbol *symbol;
-	asymbol **syms;
-	int nr_syms, ret;
+
+	int  ret;
 
 	ret = -ENOENT;
-	if (!abfd)
-		goto not_found;
-
-	if (!bfd_check_format(abfd, bfd_object))
-		goto not_found;
-
-	symtab_size = bfd_get_symtab_upper_bound(abfd);
-	if (!symtab_size)
-		goto not_found;
-
-	ret = -ENOMEM;
-	syms = malloc(symtab_size);
-	if (!syms)
-		goto not_found;
-
-	nr_syms = bfd_canonicalize_symtab(abfd, syms);
-
-	ret = -ENOENT;
-	section = bfd_get_section_by_name(abfd, ".text");
-	if (!section)
-		goto not_found;
 
 	if (!bfd_find_nearest_line(abfd, section, syms, addr, &filename, &func, &line))
 		goto not_found;
@@ -115,8 +131,6 @@ char *symbol_lookup(struct kvm *kvm, unsigned long addr, char *sym, size_t size)
 
 	sym[size - 1] = '\0';
 
-	free(syms);
-
 	return sym;
 
 not_found:
@@ -127,6 +141,9 @@ int symbol_exit(struct kvm *kvm)
 {
 	bfd_boolean ret = TRUE;
 
+	if (syms)
+		free(syms);
+	
 	if (abfd)
 		ret = bfd_close(abfd);
 
