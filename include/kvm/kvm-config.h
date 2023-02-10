@@ -35,6 +35,7 @@ struct kvm_config {
 	int nrcpus;
 	const char *kernel_cmdline;
 	const char *kernel_filename;
+	const char *kernel_symbols;
 	const char *vmlinux_filename;
 	const char *initrd_filename;
 	const char *firmware_filename;

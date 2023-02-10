@@ -12,14 +12,20 @@ static bfd *abfd;
 
 int symbol_init(struct kvm *kvm)
 {
+	const char* source = kvm->vmlinux;
+	
 	int ret = 0;
 
-	if (!kvm->vmlinux)
-		return 0;
-
+	if (!kvm->vmlinux) {
+		if (kvm->cfg.kernel_symbols == NULL )
+			return 0;
+		else
+			source=kvm->cfg.kernel_symbols;
+	}
+	
 	bfd_init();
 
-	abfd = bfd_openr(kvm->vmlinux, NULL);
+	abfd = bfd_openr(source, NULL);
 	if (abfd == NULL) {
 		bfd_error_type err = bfd_get_error();
 
@@ -35,7 +41,6 @@ int symbol_init(struct kvm *kvm)
 			break;
 		}
 	}
-
 	return ret;
 }
 late_init(symbol_init);
@@ -63,7 +68,7 @@ char *symbol_lookup(struct kvm *kvm, unsigned long addr, char *sym, size_t size)
 	bfd_vma sym_start;
 	asection *section;
 	unsigned int line;
-	const char *func;
+	const char *func=NULL;
 	long symtab_size;
 	asymbol *symbol;
 	asymbol **syms;
@@ -88,11 +93,11 @@ char *symbol_lookup(struct kvm *kvm, unsigned long addr, char *sym, size_t size)
 	nr_syms = bfd_canonicalize_symtab(abfd, syms);
 
 	ret = -ENOENT;
-	section = bfd_get_section_by_name(abfd, ".debug_aranges");
+	section = bfd_get_section_by_name(abfd, ".text");
 	if (!section)
 		goto not_found;
 
-	if (!bfd_find_nearest_line(abfd, section, NULL, addr, &filename, &func, &line))
+	if (!bfd_find_nearest_line(abfd, section, syms, addr, &filename, &func, &line))
 		goto not_found;
 
 	if (!func)

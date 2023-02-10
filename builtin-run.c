@@ -212,8 +212,10 @@ static int mem_parser(const struct option *opt, const char *arg, int unset)
 			"Kernel command line arguments"),		\
 	OPT_STRING('f', "firmware", &(cfg)->firmware_filename, "firmware",\
 			"Firmware image to boot in virtual machine"),	\
-	OPT_STRING('F', "flash", &(cfg)->flash_filename, "flash",\
+	OPT_STRING('F', "flash", &(cfg)->flash_filename, "flash",       \
 			"Flash image to present to virtual machine"),	\
+	OPT_STRING('\0', "symbols", &(cfg)->kernel_symbols, "symbols",	\
+			"BFD readable file to get symbol information"), \
 									\
 	OPT_GROUP("Networking options:"),				\
 	OPT_CALLBACK_DEFAULT('n', "network", NULL, "network params",	\
@@ -801,7 +803,7 @@ static int kvm_cmd_run_work(struct kvm *kvm)
 
 static void kvm_cmd_run_exit(struct kvm *kvm, int guest_ret)
 {
-	compat__print_all_messages();
+	//compat__print_all_messages();
 
 	init_list__exit(kvm);
 

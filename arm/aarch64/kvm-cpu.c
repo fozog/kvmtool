@@ -1,8 +1,10 @@
 #include "kvm/kvm-cpu.h"
 #include "kvm/kvm.h"
 #include "kvm/virtio.h"
+#include "kvm/symbol.h"
 
 #include <asm/ptrace.h>
+#include <linux/err.h>
 
 #define COMPAT_PSR_F_BIT	0x00000040
 #define COMPAT_PSR_I_BIT	0x00000080
@@ -232,21 +234,32 @@ int kvm_cpu__get_endianness(struct kvm_cpu *vcpu)
 	return sctlr ? VIRTIO_ENDIAN_BE : VIRTIO_ENDIAN_LE;
 }
 
+#define MAX_SYM_LEN 128
+
 void kvm_cpu__show_code(struct kvm_cpu *vcpu)
 {
 	struct kvm_one_reg reg;
 	unsigned long data;
 	int debug_fd = kvm_cpu__get_debug_fd();
-
+	char sym[MAX_SYM_LEN] = SYMBOL_DEFAULT_UNKNOWN, *psym;
+	
 	reg.addr = (u64)&data;
 
-	dprintf(debug_fd, "\n*pc:\n");
+	
+	dprintf(debug_fd, "\nPC: ");
 	reg.id = ARM64_CORE_REG(regs.pc);
 	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
 		die("KVM_GET_ONE_REG failed (show_code @ PC)");
 
 	kvm__dump_mem(vcpu->kvm, data, 32, debug_fd);
 
+	psym = symbol_lookup(vcpu->kvm, data, sym, MAX_SYM_LEN);
+	if (IS_ERR(psym))
+		dprintf(debug_fd,
+			"Warning: symbol_lookup() failed to find symbol "
+			"with error: %ld\n", PTR_ERR(psym));
+
+	dprintf(debug_fd, " (%s) \n", sym);
 	dprintf(debug_fd, "\n*lr:\n");
 	reg.id = ARM64_CORE_REG(regs.regs[30]);
 	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
@@ -260,6 +273,7 @@ void kvm_cpu__show_step(struct kvm_cpu *vcpu)
 	struct kvm_one_reg reg;
 	unsigned long pc;
 	int debug_fd = kvm_cpu__get_debug_fd();
+	char sym[MAX_SYM_LEN] = SYMBOL_DEFAULT_UNKNOWN, *psym;
 
 	reg.id		= ARM64_CORE_REG(regs.pc);
 	reg.addr = (u64)&pc;
@@ -270,6 +284,11 @@ void kvm_cpu__show_step(struct kvm_cpu *vcpu)
 	if (!host_ptr_in_ram(vcpu->kvm, instruction + 1))
 		die("SingleStep requesting instruction outside memory");
 
+	psym = symbol_lookup(vcpu->kvm, pc - 0x0000000080080000, sym, MAX_SYM_LEN);
+	if (IS_ERR(psym))
+		dprintf(debug_fd,
+			"Warning: symbol_lookup() failed to find symbol "
+			"with error: %ld\n", PTR_ERR(psym));
 
 	unsigned long value;
 	reg.addr = (u64)&value;
@@ -277,7 +296,7 @@ void kvm_cpu__show_step(struct kvm_cpu *vcpu)
 	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
 		die("KVM_GET_ONE_REG failed (lr)");
 
-	dprintf(debug_fd, " 0x%016lx: %08x    x0=%lx\n", pc, *instruction, value);
+	dprintf(debug_fd, " 0x%016lx: %08x    x0=%lx ; %s\n", pc, *instruction, value, sym);
 
 }
 
