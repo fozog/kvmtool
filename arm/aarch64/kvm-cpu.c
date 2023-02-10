@@ -68,7 +68,7 @@ static int dis_sprintf(void *stream, const char *fmt, ...) {
 }
 
 
-static char *disassemble(uint8_t *input_buffer, size_t input_buffer_size) {
+static char* disassemble(uint8_t *input_buffer, size_t input_buffer_size) {
 	char *disassembled = NULL;
 	stream_state ss = {};
 
@@ -399,7 +399,8 @@ void kvm_cpu__show_step(struct kvm_cpu *vcpu)
 	unsigned long pc;
 	int debug_fd = kvm_cpu__get_debug_fd();
 	
-	char sym[MAX_SYM_LEN] = SYMBOL_DEFAULT_UNKNOWN, *psym;
+	char sym[MAX_SYM_LEN]  = SYMBOL_DEFAULT_UNKNOWN;
+	char* psym = NULL;
 	char* opcode = NULL;
 	
 	reg.id		= ARM64_CORE_REG(regs.pc);
@@ -422,13 +423,9 @@ void kvm_cpu__show_step(struct kvm_cpu *vcpu)
 	
 #ifdef CONFIG_HAS_BFD
 	psym = symbol_lookup(vcpu->kvm, pc - 0x0000000080080000, sym, MAX_SYM_LEN);
-	if (IS_ERR(psym))
-		dprintf(debug_fd,
-			"Warning: symbol_lookup() failed to find symbol "
-			"with error: %ld\n", PTR_ERR(psym));
 #endif
 	
-	dprintf(debug_fd, "0x%012lx: %08x  %-42s ; %s\n", pc, *instruction, opcode != NULL ? opcode : "", sym);
+	dprintf(debug_fd, "0x%012lx: %08x  %-42s ; %s\n", pc, *instruction, opcode != NULL ? opcode : "", (IS_ERR(psym) || psym== NULL) ? "" : psym);
 	
 #ifdef CONFIG_HAS_OPCODES
 	if (opcode != NULL) free(opcode);
@@ -469,46 +466,62 @@ void kvm_cpu__show_registers(struct kvm_cpu *vcpu)
 
 bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 {
-	switch (vcpu->kvm_run->exit_reason) {
-	case KVM_EXIT_ARM_RAW_MODE:
-	{
-		struct kvm_one_reg reg;
-		u64 data = 0;
-		u64 pc, elr_el1;
-		int debug_fd = kvm_cpu__get_debug_fd();
+	u64 esr_el2, fault_ipa;
+	u64 pc, elr_el1;
+	int debug_fd = kvm_cpu__get_debug_fd();
+	u8 ec;
 
-		u64 esr_el2 = vcpu->kvm_run->arm_nisv.esr_iss;
-		int ec = (esr_el2 >> 26) & 0x3F;
+	struct kvm_one_reg reg;
+	u64 data = 0;
 
-		reg.id   = ARM64_CORE_REG(regs.pc);
-		reg.addr = (u64)&data;
-		if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
-			die_perror("KVM_SET_ONE_REG failed (pc)");
-		pc=data;
+	if (vcpu->kvm_run->exit_reason != KVM_EXIT_ARM_RAW_MODE) return true;
+	
+	esr_el2 = vcpu->kvm_run->arm_raw.esr_el2;
+	fault_ipa = vcpu->kvm_run->arm_raw.fault_ipa;
+	ec = (esr_el2 >> 26) & 0x3F;
 
-		reg.id   = ARM64_CORE_REG(elr_el1);
-		reg.addr = (u64)&data;
-		if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
-			die_perror("KVM_SET_ONE_REG failed (ELR_EL1)");
-		elr_el1=data;
+	
+	reg.id   = ARM64_CORE_REG(regs.pc);
+	reg.addr = (u64)&data;
+	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+		die_perror("KVM_SET_ONE_REG failed (pc)");
+	pc=data;
 
-		dprintf(debug_fd, "\nRAW @PC=%llx\n", pc);
-		dprintf(debug_fd, "    ESR_EL2=%llx\n", vcpu->kvm_run->arm_raw.esr_el2);
-		dprintf(debug_fd, "        EC=%x\n", ec);
-		dprintf(debug_fd, "    IPA=%llx\n", vcpu->kvm_run->arm_raw.fault_ipa);
-		dprintf(debug_fd, "    ELR_EL1=%llx\n", elr_el1);
+	reg.id   = ARM64_CORE_REG(elr_el1);
+	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+		die_perror("KVM_SET_ONE_REG failed (ELR_EL1)");
+	elr_el1=data;
 
-		// lets pretend the PC is at the instruction that caused the problem
-		data	= elr_el1;
-		reg.id	= ARM64_CORE_REG(regs.pc);
-		if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
-			die_perror("KVM_SET_ONE_REG failed (pc)");
+	dprintf(debug_fd, "\nRAW @PC=%llx\n", pc);
+	dprintf(debug_fd, "    ESR_EL2=%llx\n", esr_el2);
+	dprintf(debug_fd, "        EC=%x\n", ec);
+	dprintf(debug_fd, "    IPA=%llx\n", fault_ipa);
+	dprintf(debug_fd, "    ELR_EL1=%llx\n", elr_el1);
 
-		return false;
-
+	switch(ec) {
+		
+		case HVC_EXCEPTION:
+		{
+			u16 hvc_id = esr_el2 & 0xFFFF;
+			dprintf(debug_fd, "HVC #%d ignored\n", hvc_id);
+			// HVC is one of the few instructions that are trapped
+			// and for wich the PC is already set after the instr.
+			return true;
 		}
 		break;
+		
+		default:
+			return false;
+			
 	}
+	/*
+	// lets pretend the PC is at the instruction that caused the problem
+	data	= elr_el1;
+	reg.id	= ARM64_CORE_REG(regs.pc);
+	if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
+		die_perror("KVM_SET_ONE_REG failed (pc)");
 
 	return false;
+	 */
+
 }

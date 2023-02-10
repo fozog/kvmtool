@@ -20,12 +20,14 @@ int symbol_init(struct kvm *kvm)
 
 	int ret = 0;
 
-	if (!kvm->vmlinux) {
-		if (kvm->cfg.kernel_symbols == NULL )
-			return 0;
-		else
-			source=kvm->cfg.kernel_symbols;
+	if (!source) {
+		source = kvm->cfg.kernel_symbols;
+		if (!source)
+			source =  kvm->cfg.kernel_filename;
 	}
+	
+	if (!source)
+		return 0;
 	
 	bfd_init();
 
@@ -72,7 +74,7 @@ int symbol_init(struct kvm *kvm)
 		syms=NULL;
 		goto out_close;
 	}
-	
+
 	return ret;
 
 out_close:
@@ -109,10 +111,11 @@ char *symbol_lookup(struct kvm *kvm, unsigned long addr, char *sym, size_t size)
 	
 	asymbol *symbol;
 
-	int  ret;
+	int  ret  = -ENOENT;
 
-	ret = -ENOENT;
-
+	if (abfd == NULL || section == NULL || syms == NULL || nr_syms == 0)
+		return ERR_PTR(ret);
+	
 	if (!bfd_find_nearest_line(abfd, section, syms, addr, &filename, &func, &line))
 		goto not_found;
 
@@ -124,7 +127,6 @@ char *symbol_lookup(struct kvm *kvm, unsigned long addr, char *sym, size_t size)
 		goto not_found;
 
 	sym_start = bfd_asymbol_value(symbol);
-
 	sym_offset = addr - sym_start;
 
 	//snprintf(sym, size, "%s+%llx (%s:%i)", func, (long long) sym_offset, filename, line);

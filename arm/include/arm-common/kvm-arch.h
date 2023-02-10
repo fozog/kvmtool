@@ -89,6 +89,19 @@
 
 #define ARCH_HAS_PCI_EXP	1
 
+
+// Exceptions are EL2 exception (see ESR_EL2 for decoding)
+
+#define WF_EXCEPTION                    (0b000001)
+#define DATA_ABORT_EXCEPTION            (0b100100)
+#define HVC_EXCEPTION                   (0b010110)
+#define SMC_EXCEPTION                   (0b010111)
+#define MRS_EXCPETION                   (0b011000)
+#define BRK_EXCEPTION                   (0b111100)
+#define INSTRUCTION_ABORT_EXCEPTION     (0b100000)
+#define BREAKPOINT_EXCEPTION            (0b110000)
+#define SOFTWARE_STEP_EXCEPTION         (0b110010)
+
 static inline bool arm_addr_in_ioport_region(u64 phys_addr)
 {
 	u64 limit = KVM_IOPORT_AREA + ARM_IOPORT_SIZE;
