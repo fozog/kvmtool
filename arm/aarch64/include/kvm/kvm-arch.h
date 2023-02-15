@@ -15,4 +15,10 @@ void kvm__arch_enable_raw_mode(struct kvm *kvm);
 
 #include "arm-common/kvm-arch.h"
 
+typedef  enum {
+    VMM_CONTINUE,
+    VMM_EXIT_REQUESTED,
+    VMM_ABORT_REQUESTED
+} vmm_action_t;
+
 #endif /* KVM__KVM_ARCH_H */

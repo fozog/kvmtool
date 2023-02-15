@@ -56,6 +56,14 @@ enum {
 	KVM_VMSTATE_PAUSED,
 };
 
+typedef enum {
+    NONZERO     = 0x80,
+    SHORT       = 0x00,
+    LONG        = 0x01,
+    DETAILED    = 0x02,
+    FULL        = 0x03
+} detail_t;
+
 enum kvm_mem_type {
 	KVM_MEM_TYPE_RAM	= 1 << 0,
 	KVM_MEM_TYPE_DEVICE	= 1 << 1,

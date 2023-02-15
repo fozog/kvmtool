@@ -34,6 +34,7 @@
 #ifndef __ASSEMBLY__
 #include <linux/psci.h>
 #include <linux/types.h>
+#include <linux/compiler.h>
 #include <asm/ptrace.h>
 #include <asm/sve_context.h>
 

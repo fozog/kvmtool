@@ -26,6 +26,7 @@ struct kvm_cpu {
 	struct kvm_coalesced_mmio_ring	*ring;
 
 	void		(*generate_fdt_nodes)(void *fdt, struct kvm* kvm);
+	struct vcore_sys_reg_hnode*	sys_regs;
 };
 
 struct kvm_arm_target {

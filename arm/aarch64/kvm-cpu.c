@@ -2,7 +2,9 @@
 #include "kvm/kvm.h"
 #include "kvm/virtio.h"
 #include "kvm/symbol.h"
-
+#include "asm/kvm.h"
+#include "kvm/vcore_sys_regs.h"
+#include "asm/sys_regs.h"
 #include <asm/ptrace.h>
 #include <linux/err.h>
 
@@ -25,17 +27,17 @@ extern asymbol **syms;
 extern asection *section;
 extern int nr_syms;
 extern bfd *abfd;
-
 #define ABFD	abfd
 
 #else
 
 #define ABFD	NULL
+
 #endif
 
 typedef struct {
-  char *insn_buffer;
-  bool reenter;
+	char *insn_buffer;
+	bool reenter;
 } stream_state;
 
 /* This approach isn't very memory efficient or clear,
@@ -247,8 +249,8 @@ static void reset_vcpu_aarch64(struct kvm_cpu *vcpu)
 
 	//make sure we know what VBAR is.
 	//This will be needed to handle TFA execution later
-	data	= 0xf0000000;
-	reg.id	= KVM_REG_ARM_VBAR_EL1;
+	data	= INJECTION_VBAR_ADDRESS;
+	reg.id	= KVM_SYSREG_FROM_AARCH64(AARCH64_VBAR_EL1);
 	if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
 		die_perror("KVM_SET_ONE_REG failed (VBAR_EL1)");
 
