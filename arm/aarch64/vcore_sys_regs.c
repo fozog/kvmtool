@@ -2,6 +2,7 @@
 
 #include "asm/kvm.h"
 #include "kvm/kvm-arch.h"
+#include "linux/rbtree.h"
 
 #include "kvm/kvm.h"
 #include "asm/sys_regs.h"
@@ -12,7 +13,7 @@
 vmm_action_t name ## _read(struct kvm* context, struct kvm_cpu* vcore, reg_t reg, sys_reg_info_t* sys_reg); \
 vmm_action_t name ## _write(struct kvm* context, struct kvm_cpu* vcore, sys_reg_info_t* sys_reg, reg_t reg);
 
-//#define DEBUG_HASHTABLE
+#define DEBUG_HASHTABLE
 
 /*
 // defined in gic-v3.c
@@ -112,6 +113,9 @@ vmm_action_t SP_EL1_read(struct kvm* context, struct kvm_cpu* vcore, reg_t reg, 
 }
 
 
+static int order=0;
+static sys_reg_hnode_t* first = NULL;
+static sys_reg_hnode_t* last = NULL;
 int vcore_sys_reg_table_count = 0;
 sys_reg_hnode_t vcore_sys_reg_table[SYS_REG_HASHTABLE_CAPACITY];
 
@@ -121,28 +125,19 @@ int vcore_get_sys_reg_count(void)
 }
 
 /*
- There are 1067 registers, we want to minimize the number of tests to find
- a register. Let's use a 1024 entries hash table: 10 bits are needed.
- Based on encondings that have high bit of op0 always 1 and the fact that CRm
- and op2 are often used to have indexes of register sets (DBG registers for instance).
- <enc n="op0" v="0b10"/>
- <enc n="op1" v="0b000"/>
- <enc n="CRn" v="0b0000"/>
- <enc n="CRm" v="m[3:0]"/>
- <enc n="op2" v="0b101"/>
- Let's use bits: 2, 5, 7-14
+Let's use Golden Ratio = phi = (sqrt(5)-1)/2
 */
 static int vcore_sysreg_hash(sys_reg_t reg)
 {
-	int result = (reg >> 0) & 0b11;
-	result |= ((reg >> 5) & 0b11) << 2;
-	result |= ((reg >> 7) & 0b111111) << 4;
+	u64 hash = 0x61C8864680B583EBull * (u64)reg;
+	hash = (hash >> 35) ;
+	int result = hash & 0xFFFFFFFF;
 	return result;
 }
 
 sys_reg_info_t* vcore_sysreg_get_byid(sys_reg_t reg_id)
 {
-	int bucket = (vcore_sysreg_hash(reg_id) & 0x3FF) + 1;
+	int bucket = (vcore_sysreg_hash(reg_id) & (SYS_REG_HASHTABLE_CAPACITY-1)) + 1;
 	sys_reg_hnode_t* current = &vcore_sys_reg_table[bucket];
 	while(current != NULL && current->reg.id != reg_id) {
 		current = current->next;
@@ -153,10 +148,29 @@ sys_reg_info_t* vcore_sysreg_get_byid(sys_reg_t reg_id)
 	return NULL;
 }
 
+sys_reg_info_t* vcore_sysreg_get_next(sys_reg_info_t* current)
+{
+	sys_reg_hnode_t* node = container_of(current, sys_reg_hnode_t, reg);
+	int next = node->order + 1;
+	int bucket = node->order_next_bucket;
+	node = &vcore_sys_reg_table[bucket];
+	while (node != NULL) {
+		if (node->order == next) return &node->reg;
+		node = node->next;
+	}
+	return NULL;
+}
+
+sys_reg_info_t* vcore_sysreg_get_first(void)
+{
+	return &first->reg;
+}
+
+
 #ifdef DEBUG_HASHTABLE
 static sys_reg_info_t* vcore_sysreg_get_byid_introspection(sys_reg_t reg_id, int*  count)
 {
-	int bucket = (vcore_sysreg_hash(reg_id) & 0x3FF) + 1;
+	int bucket = (vcore_sysreg_hash(reg_id) & (SYS_REG_HASHTABLE_CAPACITY-1)) + 1;
 	sys_reg_hnode_t* current = &vcore_sys_reg_table[bucket];
 	while(current != NULL && current->reg.id != reg_id) {
 		current = current->next;
@@ -170,18 +184,15 @@ static sys_reg_info_t* vcore_sysreg_get_byid_introspection(sys_reg_t reg_id, int
 }
 #endif
 
-/* returns the number of added registers */
-static int order=0;
-static sys_reg_hnode_t* last = NULL;
 static int add_reg(sys_reg_t reg_id, u8 minimal_el, const char* name, const char* description)
 {
 	// make sure index is in range of capacity and keep index 0 special
-	int bucket = (vcore_sysreg_hash(reg_id) +1) & 0x3FF;
+	int bucket = (vcore_sysreg_hash(reg_id) +1) & (SYS_REG_HASHTABLE_CAPACITY-1);
 	sys_reg_hnode_t* head = &vcore_sys_reg_table[bucket];
 	sys_reg_hnode_t* current = head;
 	sys_reg_hnode_t* prev = NULL;
 	
-#ifdef DEBUG_HASHTABLE
+#ifdef DEBUG_HASHTABLE2
 	fprintf(stderr, "bucket[%d]@%p: %s\n", bucket, head, name);
 #endif
 	if (current->reg.id == reg_id) return 0;
@@ -196,21 +207,33 @@ static int add_reg(sys_reg_t reg_id, u8 minimal_el, const char* name, const char
 	bool add = false;
 	if (current == NULL) {
 		if (prev != head) {
+#ifdef DEBUG_HASHTABLE2
+			fprintf(stderr, "adding at the end\n");
+#endif
 			add = true;
 		}
 		else {
 			// bucket empty
+#ifdef DEBUG_HASHTABLE2
+			fprintf(stderr, "adding in the head\n");
+#endif
 			current = head;
 		}
 	}
 	else {
-		if (current->reg.id != reg_id) {
+		if ((current->reg.id != 0) &&  (current->reg.id != reg_id)) {
 			// head bucket non empty
+#ifdef DEBUG_HASHTABLE2
+			fprintf(stderr, "adding first allocated\n");
+#endif
 			add=true;
 		}
 	}
 	if (add) {
-		//fprintf(stderr, "    alloc\n");
+#ifdef DEBUG_HASHTABLE2
+		fprintf(stderr, "    alloc\n");
+#endif
+		
 		current->next = malloc(sizeof(sys_reg_hnode_t));
 		if (current->next == NULL) {
 			die("Could not add register %s\n", name);
@@ -218,15 +241,16 @@ static int add_reg(sys_reg_t reg_id, u8 minimal_el, const char* name, const char
 		memset(current->next, 0, sizeof(sys_reg_hnode_t));
 		current = current->next;
 	}
-	//fprintf(stderr, "    install @%p\n", current);
-
+	
 	current->reg.id = reg_id;
 	current->reg.minimal_el = minimal_el;
 	current->reg.name = name;
 	current->reg.description = description;
 	current->order = order++;
 	if (last != NULL) last->order_next_bucket = bucket;
+	if (first == NULL) first = current;
 	last = current;
+	
 	return 1;
 }
 
@@ -239,6 +263,14 @@ static int add_reg(sys_reg_t reg_id, u8 minimal_el, const char* name, const char
 static int add_sysregs(void)
 {
 	int i = 0;
+	i += add_reg(AARCH64_ICC_AP0R_0_EL1, 1, AARCH64_ICC_AP0R_0_EL1_NAME, AARCH64_ICC_AP0R_0_EL1_DESC);
+	i += add_reg(AARCH64_ICC_AP0R_1_EL1, 1, AARCH64_ICC_AP0R_1_EL1_NAME, AARCH64_ICC_AP0R_1_EL1_DESC);
+	i += add_reg(AARCH64_ICC_AP0R_2_EL1, 1, AARCH64_ICC_AP0R_2_EL1_NAME, AARCH64_ICC_AP0R_2_EL1_DESC);
+	i += add_reg(AARCH64_ICC_AP0R_3_EL1, 1, AARCH64_ICC_AP0R_3_EL1_NAME, AARCH64_ICC_AP0R_3_EL1_DESC);
+	i += add_reg(AARCH64_ICC_AP1R_0_EL1, 1, AARCH64_ICC_AP1R_0_EL1_NAME, AARCH64_ICC_AP1R_0_EL1_DESC);
+	i += add_reg(AARCH64_ICC_AP1R_1_EL1, 1, AARCH64_ICC_AP1R_1_EL1_NAME, AARCH64_ICC_AP1R_1_EL1_DESC);
+	i += add_reg(AARCH64_ICC_AP1R_2_EL1, 1, AARCH64_ICC_AP1R_2_EL1_NAME, AARCH64_ICC_AP1R_2_EL1_DESC);
+	i += add_reg(AARCH64_ICC_AP1R_3_EL1, 1, AARCH64_ICC_AP1R_3_EL1_NAME, AARCH64_ICC_AP1R_3_EL1_DESC);
 	i += add_reg(AARCH64_TRCSSCCR_0, 1, AARCH64_TRCSSCCR_0_NAME, AARCH64_TRCSSCCR_0_DESC);
 	i += add_reg(AARCH64_TRCSSCCR_1, 1, AARCH64_TRCSSCCR_1_NAME, AARCH64_TRCSSCCR_1_DESC);
 	i += add_reg(AARCH64_TRCSSCCR_2, 1, AARCH64_TRCSSCCR_2_NAME, AARCH64_TRCSSCCR_2_DESC);
@@ -247,6 +279,8 @@ static int add_sysregs(void)
 	return i;
 }
 #endif
+
+
 
 static int vcore_sys_regs__init(struct kvm *kvm)
 {
@@ -282,6 +316,15 @@ static int vcore_sys_regs__init(struct kvm *kvm)
 	int v = 0;
 	sys_reg_info_t* reg = vcore_sysreg_get_byid_introspection(AARCH64_TTBR0_EL1, &v);
 	fprintf(stderr, "%s access in %d tests\n", reg->name, v);
+#ifdef DEBUG_HASHTABLE2
+	i=0;
+	for(reg = vcore_sysreg_get_first(); reg!= NULL; reg = vcore_sysreg_get_next(reg)) {
+		sys_reg_hnode_t* node = container_of(reg, sys_reg_hnode_t, reg);
+		fprintf(stderr, "%d: %s %d\n",node->order, reg->name, node->order_next_bucket);
+		i++;
+	}
+	fprintf(stderr, "printed: %d\n", i);
+#endif
 #endif
 	
 	return 0;

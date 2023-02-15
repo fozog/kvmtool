@@ -60,8 +60,8 @@ typedef struct vcore_sys_reg_hnode {
 	vcore_sys_reg_t sysreg;
 } vcore_sys_reg_hnode_t;
 
-//If you change this, adapt the hash calculation
-#define SYS_REG_HASHTABLE_CAPACITY	1024
+//must be a power of two
+#define SYS_REG_HASHTABLE_CAPACITY	2048
 
 static inline u64 vcore_read_sysreg_fromkvm(struct kvm_cpu* vcpu, sys_reg_t reg)
 {
@@ -74,6 +74,8 @@ static inline u64 vcore_read_sysreg_fromkvm(struct kvm_cpu* vcpu, sys_reg_t reg)
 	return data;
 }
 
+sys_reg_info_t* vcore_sysreg_get_next(sys_reg_info_t* current);
+sys_reg_info_t* vcore_sysreg_get_first(void);
 int vcore_get_sys_reg_count(void);
 sys_reg_info_t*  vcore_sysreg_get_byid(sys_reg_t reg);
 
