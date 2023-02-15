@@ -578,6 +578,9 @@ clean:
 	$(Q) rm -f x86/bios/*.elf
 	$(Q) rm -f x86/bios/*.o
 	$(Q) rm -f x86/bios/bios-rom.h
+	$(Q) rm -f tests/arm/inject_nisv/*.o
+	$(Q) rm -f tests/arm/inject_nisv/*.elf
+	$(Q) rm -f tests/arm/inject_nisv/*.bin
 	$(Q) rm -f tests/boot/boot_test.iso
 	$(Q) rm -rf tests/boot/rootfs/
 	$(Q) rm -f $(DEPS) $(STATIC_DEPS) $(OBJS) $(OTHEROBJS) $(OBJS_DYNOPT) $(STATIC_OBJS) $(PROGRAM) $(PROGRAM_ALIAS) $(PROGRAM)-static $(GUEST_INIT) $(GUEST_PRE_INIT) $(GUEST_OBJS)

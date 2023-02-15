@@ -485,7 +485,7 @@ void kvm_cpu__show_registers(struct kvm_cpu *vcpu)
 }
 
 
-bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
+static bool handle_raw(struct kvm_cpu *vcpu)
 {
 	u64 esr_el2, fault_ipa;
 	u64 pc, elr_el1;
@@ -494,8 +494,6 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 
 	struct kvm_one_reg reg;
 	u64 data = 0;
-
-	if (vcpu->kvm_run->exit_reason != KVM_EXIT_ARM_RAW_MODE) return true;
 	
 	esr_el2 = vcpu->kvm_run->arm_raw.esr_el2;
 	fault_ipa = vcpu->kvm_run->arm_raw.fault_ipa;
@@ -609,4 +607,29 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 			
 	}
 
+
+}
+
+static bool handle_nisv(struct kvm_cpu *vcpu)
+{
+	int debug_fd = kvm_cpu__get_debug_fd();
+	dprintf(debug_fd, "\nNISV received!!!\n");
+	kvm_cpu__show_step(vcpu);
+	kvm_cpu__show_registers(vcpu);
+	return false;
+}
+
+bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
+{
+	switch(vcpu->kvm_run->exit_reason) {
+		case KVM_EXIT_ARM_RAW_MODE:
+			return handle_raw(vcpu);
+			
+		case KVM_EXIT_ARM_NISV:
+			return handle_nisv(vcpu);
+
+		default:
+			return true;
+	}
+	return true;
 }

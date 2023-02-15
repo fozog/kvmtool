@@ -93,6 +93,8 @@ void kvm__arch_init(struct kvm *kvm)
 
 	kvm__arch_enable_mte(kvm);
 
+	kvm__arch_enable_nisv_mode(kvm);
+	
 	kvm__arch_enable_raw_mode(kvm);
 }
 

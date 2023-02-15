@@ -16,6 +16,7 @@ struct kvm_config_arch {
 	u64		fw_addr;
 	bool 		no_pvtime;
 	bool 		enable_raw;
+	bool 		enable_nisv;
 };
 
 int irqchip_parser(const struct option *opt, const char *arg, int unset);

@@ -21,7 +21,9 @@ int vcpu_affinity_parser(const struct option *opt, const char *arg, int unset);
 	OPT_BOOLEAN('\0', "no-pvtime", &(cfg)->no_pvtime, "Disable"	\
 			" stolen time"),				\
 	OPT_BOOLEAN('\0', "enable-raw", &(cfg)->enable_raw,        	\
-			"Enable RAW handling if platform supports it"),
+			"Enable RAW handling if platform supports it"), \
+	OPT_BOOLEAN('\0', "enable-nisv", &(cfg)->enable_nisv,        	\
+		    "Enable NISV handling if platform supports it"),
 
 #include "arm-common/kvm-config-arch.h"
 
