@@ -20,8 +20,8 @@ typedef vmm_action_t (*setter_f)(struct kvm* context, struct kvm_cpu* vcore, str
 /* sys_regs table */
 typedef struct sys_reg_info {
 	sys_reg_t	id;
-	uint64_t        reset_value;
-	uint64_t        minimal_el;
+	u64        	reset_value;
+	u64        	minimal_el;
 	const char*     name;
 	const char*     description;
 	formatter_f     formatter;
@@ -29,8 +29,41 @@ typedef struct sys_reg_info {
 	setter_f        write;
 } sys_reg_info_t;
 
+/* hash table for sys_regs*/
+struct sys_reg_hnode;
+typedef struct sys_reg_hnode {
+	struct sys_reg_hnode* next;
+	sys_reg_info_t	reg;
+	u16		order;			// pretty print
+	u16		order_next_bucket;	// pretty print
+} sys_reg_hnode_t;
 
-static inline u64 vcore_get_sysreg(struct kvm_cpu* vcpu, sys_reg_t reg)
+
+// lets make sure that the combination of vcore_sys_reg in hashtable is
+// 64 bytes long.
+typedef struct vcore_sys_reg {
+	union {
+		struct {
+			sys_reg_t	id;
+			uint64_t        value;
+			getter_f        read;			// cached
+			setter_f        write;			// cached
+		};
+		__u64	padding[7];
+	};
+} vcore_sys_reg_t;
+
+/* hash table for vcore_sys_regs */
+struct vcore_sys_reg_hnode;
+typedef struct vcore_sys_reg_hnode {
+	struct vcore_sys_reg_hnode* next;
+	vcore_sys_reg_t sysreg;
+} vcore_sys_reg_hnode_t;
+
+//If you change this, adapt the hash calculation
+#define SYS_REG_HASHTABLE_CAPACITY	1024
+
+static inline u64 vcore_read_sysreg_fromkvm(struct kvm_cpu* vcpu, sys_reg_t reg)
 {
 	u64 data;
 	struct kvm_one_reg kvm_reg;
@@ -42,7 +75,7 @@ static inline u64 vcore_get_sysreg(struct kvm_cpu* vcpu, sys_reg_t reg)
 }
 
 int vcore_get_sys_reg_count(void);
-int vcore_get_index(sys_reg_t reg);
+sys_reg_info_t*  vcore_sysreg_get_byid(sys_reg_t reg);
 
 #endif
 

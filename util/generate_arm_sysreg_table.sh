@@ -4,16 +4,17 @@ TMP=/tmp/generate_table.$$
 
 #trap "rm $TMP; exit" EXIT
 
-grep "__AARCH64_SYS_REG([^o]" include/asm/sys_regs.h | tr '\t' ' '| cut -d' ' -f2 > $TMP
+grep "__AARCH64_SYS_REG([^o]"  arm/aarch64/include/asm/sys_regs.h | tr '\t' ' '| cut -d' ' -f2 > $TMP
 set $(wc -l $TMP)
 ((COUNT=$1 +1))
 
 echo "#include \"asm/sys_regs.h\""
-echo "#include \"kvm/vcore_sys_regs.h\""
 echo ""
-echo "sys_reg_info_t sys_regs[$COUNT] ="
+echo "static int add_sysregs(void)"
 echo "{"
 
+echo "	int i = 0;"
+echo ""
 while read reg
 do
 	level=${reg#*_EL}
@@ -83,6 +84,7 @@ do
 	if [[ "$level" == "" || ! ("$level" ==  "0" || "$level" ==  "1" || "$level" ==  "2" || $level ==  "3" ) ]]; then
 		echo "bad level $level for $reg"
 	fi
-	echo "{ .id=${reg}, .minimal_el=$level, .name=${reg}_NAME, .description=${reg}_DESC },"
+	echo "	i += add_reg(${reg}, $level, ${reg}_NAME, ${reg}_DESC);"
 done < $TMP
-echo "};"
+echo "	return i;"
+echo "}"

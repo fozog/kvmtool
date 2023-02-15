@@ -1324,39 +1324,39 @@ int tcr_el3(sys_reg_t reg, u64 value, int spacing, detail_t detail)
 
 const char* vcore_get_sys_reg_name(sys_reg_t reg)
 {
-    int i = vcore_get_index(reg);
-    if (i>=0) return sys_regs[i].name;
-    return "unknown";
+	sys_reg_info_t* found = vcore_sysreg_get_byid(reg);
+	if (found != NULL) return found->name;
+	return "unknown";
 }
 
 const char* vcore_get_sys_reg_desc(sys_reg_t reg)
 {
-    int i = vcore_get_index(reg);
-    if (i>=0) return sys_regs[i].description;
-    return "";
+	sys_reg_info_t* found = vcore_sysreg_get_byid(reg);
+	if (found != NULL) return found->description;
+	return "";
 }
 
 int vcore_print_sys_reg(sys_reg_t reg, u64 value, int spacing, detail_t detail)
 {
-    int i = vcore_get_index(reg);
-    if (i>=0) {
-        if (detail == SHORT || detail == NONZERO) {
-            if ((value != 0 && detail == NONZERO) || (detail == SHORT)) fprintf(stderr, "%.*s%s=%llx\n", spacing, SPACER, sys_regs[i].name, value);
-        }
-        else {
-            if (((detail & NONZERO) && value !=0) || !(detail & NONZERO)) {
-                fprintf(stderr, "%.*s%s=%llx %s\n", spacing, SPACER, sys_regs[i].name, value, sys_regs[i].description);
-                detail &= ~NONZERO;
-                if (detail == DETAILED || detail == FULL) {
-                    formatter_f formatter = sys_regs[i].formatter != NULL ? sys_regs[i].formatter : not_implemented;
-                    formatter(reg, value,   spacing, detail);
-                }
-            }
-        }
-        return 0;
-    }
-    fprintf(stderr, "Unknown register %x\n", (int)reg);
-    return 0;
+	sys_reg_info_t* found = vcore_sysreg_get_byid(reg);
+	if (found != NULL) {
+		if (detail == SHORT || detail == NONZERO) {
+			if ((value != 0 && detail == NONZERO) || (detail == SHORT)) fprintf(stderr, "%.*s%s=%llx\n", spacing, SPACER, found->name, value);
+		}
+		else {
+			if (((detail & NONZERO) && value !=0) || !(detail & NONZERO)) {
+				fprintf(stderr, "%.*s%s=%llx %s\n", spacing, SPACER, found->name, value, found->description);
+				detail &= ~NONZERO;
+				if (detail == DETAILED || detail == FULL) {
+					formatter_f formatter = found->formatter != NULL ? found->formatter : not_implemented;
+					formatter(reg, value,   spacing, detail);
+				}
+			}
+		}
+		return 0;
+	}
+	fprintf(stderr, "Unknown register %x\n", (int)reg);
+	return 0;
 }
 
 #define FORMAT_1DIGIT  " x%d=%016llx "
@@ -1408,6 +1408,7 @@ int vcore_print_general_regs(struct kvm_cpu* vcore, int spacing)
 
 int vcore_print_sys_regs(struct kvm_cpu* vcore, int spacing, detail_t detail)
 {
+	/*
 	int i;
 
 	int register_count = vcore_get_sys_reg_count();
@@ -1422,6 +1423,7 @@ int vcore_print_sys_regs(struct kvm_cpu* vcore, int spacing, detail_t detail)
 		}
 		vcore_print_sys_reg( sys_regs[i].id, value, spacing, detail);
 	}
+	 */
 	return 0;
 }
 

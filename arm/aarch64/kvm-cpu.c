@@ -554,7 +554,18 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 		{
 			// We trap MRS and MSR on registers like TTBR1_EL1
 
-			dprintf(debug_fd, "MRS_EXCPETION\n");
+			
+			int crm = (esr_el2 >> 1) & 0xF;
+			int crn = (esr_el2 >> 10) & 0xF;
+			int op0 = (esr_el2 >> 20) & 0x3;
+			int op1 = (esr_el2 >> 14) & 0x7;
+			int op2 = (esr_el2 >> 17) & 0x7;
+			bool is_read = (esr_el2 & 1) != 0;
+			sys_reg_t key = (op0 << 14) | (op1 << 11) | (crn << 7) | (crm << 3) | op2;
+			sys_reg_info_t* sysreg = vcore_sysreg_get_byid(key);
+
+			dprintf(debug_fd, "MRS_EXCPETION %s %s (%s)\n", is_read ? "read" : "write", sysreg->name, sysreg->description);
+
 			data	= pc + 4;
 			reg.id	= ARM64_CORE_REG(regs.pc);
 			if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
