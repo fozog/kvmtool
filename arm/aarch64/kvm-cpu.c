@@ -249,7 +249,7 @@ static void reset_vcpu_aarch64(struct kvm_cpu *vcpu)
 
 	//make sure we know what VBAR is.
 	//This will be needed to handle TFA execution later
-	data	= INJECTION_VBAR_ADDRESS;
+	data	= EMULATION_VBAR_ADDRESS;
 	reg.id	= KVM_SYSREG_FROM_AARCH64(AARCH64_VBAR_EL1);
 	if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
 		die_perror("KVM_SET_ONE_REG failed (VBAR_EL1)");
@@ -428,6 +428,11 @@ void kvm_cpu__show_step(struct kvm_cpu *vcpu)
 	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
 		die("KVM_GET_ONE_REG failed (pc)");
 	
+	if (IS_IN_EMULATION_TABLE(pc)) {
+		// just ignore, execution will actually trigger Instruction Abort
+		return;
+	}
+	
 	uint32_t* instruction = guest_flat_to_host(vcpu->kvm, pc);
 	if (!host_ptr_in_ram(vcpu->kvm, instruction + 1))
 		die("SingleStep requesting instruction outside memory");
@@ -519,6 +524,7 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 			reg.id	= ARM64_CORE_REG(regs.pc);
 			if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
 				die_perror("KVM_SET_ONE_REG failed (pc)");
+			if (cpu->kvm->cfg.single_step) kvm_cpu__show_step(vcpu);
 */
 			return false;
 		}
@@ -544,7 +550,7 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 			reg.id	= ARM64_CORE_REG(regs.pc);
 			if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
 				die_perror("KVM_SET_ONE_REG failed (pc)");
-
+			if (vcpu->kvm->cfg.single_step) kvm_cpu__show_step(vcpu);
 			return true;
 		}
 		break;
@@ -570,6 +576,8 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 			reg.id	= ARM64_CORE_REG(regs.pc);
 			if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
 				die_perror("KVM_SET_ONE_REG failed (pc)");
+			
+			if (vcpu->kvm->cfg.single_step) kvm_cpu__show_step(vcpu);
 			return true;
 		}
 		break;
@@ -584,6 +592,7 @@ bool kvm_cpu__handle_exit(struct kvm_cpu *vcpu)
 			reg.id	= ARM64_CORE_REG(regs.pc);
 			if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
 				die_perror("KVM_SET_ONE_REG failed (pc)");
+			if (vcpu->kvm->cfg.single_step) kvm_cpu__show_step(vcpu);
 */
 			return false;
 		}

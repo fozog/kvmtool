@@ -13,7 +13,8 @@
 vmm_action_t name ## _read(struct kvm* context, struct kvm_cpu* vcore, reg_t reg, sys_reg_info_t* sys_reg); \
 vmm_action_t name ## _write(struct kvm* context, struct kvm_cpu* vcore, sys_reg_info_t* sys_reg, reg_t reg);
 
-#define DEBUG_HASHTABLE
+//#define DEBUG_HASHTABLE
+//#define DEBUG_HASHTABLE2
 
 /*
 // defined in gic-v3.c
